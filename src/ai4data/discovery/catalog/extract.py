@@ -401,10 +401,8 @@ def fetch_metadata_from_extract(
         )
         response.raise_for_status()
         fallback: dict = response.json()
-        if fallback.get("type") == "timeseries":
-            fallback["type"] = "indicator"
-        if fallback.get("type") == "survey":
-            fallback["type"] = "microdata"
+        if fallback.get("type"):
+            fallback["type"] = normalize_catalog_metadata_type(fallback["type"])
         metadata = fallback
 
     return metadata
