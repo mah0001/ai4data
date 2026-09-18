@@ -125,17 +125,22 @@ def study_idno(study: dict[str, Any]) -> str | None:
 
 
 def study_metadata_type(study: dict[str, Any]) -> str | None:
-    metadata = study.get("metadata")
-    if isinstance(metadata, dict):
-        mtype = metadata.get("type")
-        if mtype:
-            return normalize_catalog_metadata_type(str(mtype))
+    """The normalized dataset type of a study.
 
-    filters = study.get("filters")
-    if isinstance(filters, dict):
-        dataset_type = filters.get("dataset_type")
+    NADA's own ``dataset_type`` (``filters`` / ``core_fields``) is authoritative. The record's inner
+    ``metadata.type`` is only a fallback: it is unrelated to the dataset type for some schemas (ISO
+    geospatial records carry ``type: "dataset"``), so trusting it first misclassified them.
+    """
+    for section in ("filters", "core_fields"):
+        source = study.get(section)
+        dataset_type = source.get("dataset_type") if isinstance(source, dict) else None
         if dataset_type:
             return normalize_catalog_metadata_type(str(dataset_type))
+
+    metadata = study.get("metadata")
+    mtype = metadata.get("type") if isinstance(metadata, dict) else None
+    if mtype:
+        return normalize_catalog_metadata_type(str(mtype))
 
     return None
 
@@ -193,9 +198,9 @@ def study_to_catalog_metadata(study: dict[str, Any]) -> dict[str, Any]:
     if idno:
         result["idno"] = idno
 
-    mtype = result.get("type") or study_metadata_type(study)
+    mtype = study_metadata_type(study)
     if mtype:
-        result["type"] = normalize_catalog_metadata_type(str(mtype))
+        result["type"] = mtype
 
     filters = study.get("filters")
     if isinstance(filters, dict):

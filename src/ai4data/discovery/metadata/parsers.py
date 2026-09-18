@@ -23,6 +23,21 @@ def date_parse(date: str) -> pd.Timestamp:
     return pd.to_datetime(date)
 
 
+def _format_date(value) -> str | None:
+    """``YYYY-MM-DD`` for a parsable date, else ``None``.
+
+    Catalog records hold free text (placeholders such as ``"string"``, ``"n.d."``); one unparsable date
+    must not make the whole record fail to index, so it just yields no date.
+    """
+    if value is None or isinstance(value, bool) or not str(value).strip():
+        return None
+    try:
+        parsed = date_parse(str(value).strip())
+    except (ValueError, TypeError, OverflowError):
+        return None
+    return None if pd.isna(parsed) else parsed.strftime("%Y-%m-%d")
+
+
 def _as_dict(value) -> dict:
     """``value`` when it is a dict, else ``{}`` — malformed shapes yield empty results, not errors."""
     return value if isinstance(value, dict) else {}
@@ -449,13 +464,7 @@ class DocumentParser(Parser):
         """
         document_description = self.get_document_description(metadata)
 
-        date_published: str = document_description.get("date_published", None)
-
-        date_published = (
-            date_parse(date_published).strftime("%Y-%m-%d") if date_published else None
-        )
-
-        return date_published
+        return _format_date(document_description.get("date_published"))
 
     def parse_date_created(self, metadata: dict) -> str:
         """
@@ -469,13 +478,7 @@ class DocumentParser(Parser):
         """
         document_description = self.get_document_description(metadata)
 
-        date_created: str = document_description.get("date_created", None)
-
-        date_created = (
-            date_parse(date_created).strftime("%Y-%m-%d") if date_created else None
-        )
-
-        return date_created
+        return _format_date(document_description.get("date_created"))
 
     def parse_periods(self, metadata: dict, out_format: str = "summary") -> str | dict:
         """
