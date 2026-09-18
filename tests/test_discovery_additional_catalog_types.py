@@ -164,6 +164,22 @@ class IdnoTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             get_idno({}, "citation")
 
+    def test_falls_back_to_the_catalog_idno_when_the_schema_idno_is_absent(self) -> None:
+        # image/video schemas make ``idno`` optional; real NADA image records often omit it.
+        image = {"idno": "GEMS_1", "image_description": {"iptc": {}}}
+        video = {"idno": "VID_1", "video_description": {"title": "No idno here"}}
+
+        self.assertEqual(get_idno(image, "image"), "GEMS_1")
+        self.assertEqual(get_idno(video, "video"), "VID_1")
+        self.assertEqual(get_filter_facets({"type": "image", **image}).idno, "GEMS_1")
+
+    def test_schema_idno_wins_over_the_top_level_one(self) -> None:
+        self.assertEqual(get_idno({"idno": "TOP", **_IMAGE_DCMI}, "image"), "I1")
+
+    def test_missing_everywhere_raises(self) -> None:
+        with self.assertRaises(KeyError):
+            get_idno({"image_description": {}}, "image")
+
 
 class TemplateTests(unittest.TestCase):
     def test_indicator_db_templates(self) -> None:

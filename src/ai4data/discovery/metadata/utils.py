@@ -52,10 +52,15 @@ def get_idno(metadata: dict, metadata_type: str) -> str:
         raise ValueError(f"Type {metadata_type} not supported")
 
     idno = metadata
-    for key in IDNO_KEYS[metadata_type].split("."):
-        idno = idno[key]
+    try:
+        for key in IDNO_KEYS[metadata_type].split("."):
+            idno = idno[key]
+    except (KeyError, TypeError):
+        idno = None
 
-    return idno
+    # The image and video schemas make their own ``idno`` optional, but the catalog idno is always
+    # copied to the top level (by the extract client and by MetadataLoader).
+    return idno or metadata["idno"]
 
 
 def get_metadata_ids(metadata_type: str) -> list[dict]:
