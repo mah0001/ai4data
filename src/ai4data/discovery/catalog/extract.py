@@ -180,7 +180,7 @@ def study_to_search_row(study: dict[str, Any]) -> dict[str, Any]:
     """Build a catalog-search-compatible row from one extract study payload."""
     core = study.get("core_fields") if isinstance(study.get("core_fields"), dict) else {}
     return {
-        "id": core.get("id") or study.get("id"),
+        "id": core.get("survey_uid"),
         "idno": study_idno(study),
         "type": study_metadata_type(study),
     }
@@ -205,6 +205,10 @@ def study_to_catalog_metadata(study: dict[str, Any]) -> dict[str, Any]:
     filters = study.get("filters")
     if isinstance(filters, dict):
         result["_extract_filters"] = filters
+
+    core_fields = study.get("core_fields")
+    if isinstance(core_fields, dict):
+        result["_extract_core_fields"] = core_fields
 
     downloads = study_download_resources(study)
     if downloads:

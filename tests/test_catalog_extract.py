@@ -54,6 +54,13 @@ class TestStudyNormalization(unittest.TestCase):
         self.assertEqual(metadata["idno"], "RWA_NISR_DOC_2025_CPI-MR_MAY_FR_V1")
         self.assertIn("_extract_filters", metadata)
         self.assertEqual(metadata["_extract_filters"]["dataset_type"], "document")
+        self.assertEqual(metadata["_extract_core_fields"]["survey_uid"], 42)
+        self.assertEqual(metadata["_extract_core_fields"]["idno"], "RWA_NISR_DOC_2025_CPI-MR_MAY_FR_V1")
+
+    def test_study_to_catalog_metadata_without_core_fields(self):
+        study = {key: value for key, value in SAMPLE_STUDY.items() if key != "core_fields"}
+        study["idno"] = "RWA_NISR_DOC_2025_CPI-MR_MAY_FR_V1"
+        self.assertNotIn("_extract_core_fields", catalog_extract.study_to_catalog_metadata(study))
 
     def test_study_to_search_row(self):
         row = catalog_extract.study_to_search_row(SAMPLE_STUDY)
