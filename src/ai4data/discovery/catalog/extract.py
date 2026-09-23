@@ -355,6 +355,80 @@ def iter_extract_studies(
         offset += page_size
 
 
+def _variables_from_response(data: dict[str, Any]) -> list[dict[str, Any]]:
+    variables = data.get("variables")
+    return [v for v in variables if isinstance(v, dict)] if isinstance(variables, list) else []
+
+
+def fetch_extract_variables_page(
+    params: dict[str, Any] | None = None,
+    *,
+    base_url: str | None = None,
+    headers: dict[str, str] | None = None,
+    cookies: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Fetch one paginated ``/variables`` page (the whole catalog, for a full backfill)."""
+    base = base_url or extract_base_url()
+    if not base:
+        raise CatalogExtractError("Extract path is not configured")
+
+    return _request_extract(f"{base.rstrip('/')}/variables", params=params, headers=headers, cookies=cookies)
+
+
+def fetch_extract_survey_variables(
+    idno: str,
+    *,
+    base_url: str | None = None,
+    headers: dict[str, str] | None = None,
+    cookies: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Fetch every variable of one study by idno (for reindexing on a study change)."""
+    base = base_url or extract_base_url()
+    if not base:
+        raise CatalogExtractError("Extract path is not configured")
+
+    encoded = quote(idno.strip(), safe="")
+    return _request_extract(
+        f"{base.rstrip('/')}/variables/{encoded}",
+        headers=headers,
+        cookies=cookies,
+    )
+
+
+def iter_extract_variables(
+    params: dict[str, Any] | None = None,
+    *,
+    max_items: int | None = None,
+    page_size: int = 200,
+    base_url: str | None = None,
+    headers: dict[str, str] | None = None,
+    cookies: dict[str, str] | None = None,
+) -> Iterator[dict[str, Any]]:
+    """Paginate every variable in the catalog (the ``/variables`` batch route)."""
+    offset = 0
+    seen = 0
+    while True:
+        data = fetch_extract_variables_page(
+            {**(params or {}), "offset": offset, "limit": page_size},
+            base_url=base_url,
+            headers=headers,
+            cookies=cookies,
+        )
+        batch = _variables_from_response(data)
+        if not batch:
+            break
+
+        for variable in batch:
+            yield variable
+            seen += 1
+            if max_items is not None and seen >= max_items:
+                return
+
+        if not data.get("has_more"):
+            break
+        offset += page_size
+
+
 def write_metadata_cache(
     metadata: dict[str, Any],
     idno: str,

@@ -198,6 +198,68 @@ class TestClassicCatalogRegression(unittest.TestCase):
             self.assertIn("/api/catalog/json/DOC-1", called_url)
 
 
+class TestVariablesExtract(ExtractModeTestCase):
+    @mock.patch("ai4data.discovery.catalog.extract.httpx.get")
+    def test_fetch_extract_variables_page_hits_the_variables_route(self, mock_get):
+        mock_get.return_value = _FakeResponse(
+            {"status": "success", "offset": 0, "limit": 2, "total": 5, "has_more": True, "variables": [{"a": 1}]}
+        )
+
+        data = catalog_extract.fetch_extract_variables_page({"offset": 0, "limit": 2})
+
+        self.assertEqual(data["total"], 5)
+        self.assertEqual(data["variables"], [{"a": 1}])
+        called_url = mock_get.call_args.args[0]
+        self.assertTrue(called_url.endswith("/variables"))
+
+    @mock.patch("ai4data.discovery.catalog.extract.httpx.get")
+    def test_fetch_extract_survey_variables_hits_the_study_route(self, mock_get):
+        mock_get.return_value = _FakeResponse({"status": "success", "found": 1, "variables": [{"a": 1}]})
+
+        data = catalog_extract.fetch_extract_survey_variables("PSE-PCBS-AGC-2010-V1.0")
+
+        self.assertEqual(data["found"], 1)
+        called_url = mock_get.call_args.args[0]
+        self.assertTrue(called_url.endswith("/variables/PSE-PCBS-AGC-2010-V1.0"))
+
+    @mock.patch("ai4data.discovery.catalog.extract.httpx.get")
+    def test_iter_extract_variables_pages_until_has_more_is_false(self, mock_get):
+        mock_get.side_effect = [
+            _FakeResponse({"status": "success", "has_more": True, "variables": [{"a": 1}, {"a": 2}]}),
+            _FakeResponse({"status": "success", "has_more": False, "variables": [{"a": 3}]}),
+        ]
+
+        rows = list(catalog_extract.iter_extract_variables(page_size=2))
+
+        self.assertEqual([r["a"] for r in rows], [1, 2, 3])
+        self.assertEqual(mock_get.call_count, 2)
+
+    @mock.patch("ai4data.discovery.catalog.extract.httpx.get")
+    def test_iter_extract_variables_stops_at_an_empty_page(self, mock_get):
+        mock_get.return_value = _FakeResponse({"status": "success", "has_more": True, "variables": []})
+
+        rows = list(catalog_extract.iter_extract_variables())
+
+        self.assertEqual(rows, [])
+
+    @mock.patch("ai4data.discovery.catalog.extract.httpx.get")
+    def test_iter_extract_variables_respects_max_items(self, mock_get):
+        mock_get.return_value = _FakeResponse(
+            {"status": "success", "has_more": True, "variables": [{"a": 1}, {"a": 2}, {"a": 3}]}
+        )
+
+        rows = list(catalog_extract.iter_extract_variables(max_items=2))
+
+        self.assertEqual(len(rows), 2)
+
+    @mock.patch("ai4data.discovery.catalog.extract.httpx.get")
+    def test_access_denied_raises_for_variables_too(self, mock_get):
+        mock_get.return_value = _FakeResponse({"status": "ACCESS-DENIED"})
+
+        with self.assertRaises(catalog_extract.CatalogExtractError):
+            catalog_extract.fetch_extract_variables_page({"offset": 0, "limit": 1})
+
+
 class TestBatchExtractSinglePass(ExtractModeTestCase):
     @mock.patch("ai4data.discovery.catalog.extract.httpx.get")
     def test_scrape_all_metadata_single_http_sequence(self, mock_get):
