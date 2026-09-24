@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 from urllib.parse import quote
 
@@ -378,11 +378,16 @@ def fetch_extract_variables_page(
 def fetch_extract_survey_variables(
     idno: str,
     *,
+    params: dict[str, Any] | None = None,
     base_url: str | None = None,
     headers: dict[str, str] | None = None,
     cookies: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Fetch every variable of one study by idno (for reindexing on a study change)."""
+    """Fetch ONE page of a study's variables (``limit``/``after_uid``/``offset`` in ``params``).
+
+    A study can have far more variables than fit comfortably in one response, so the route is paged; use
+    :func:`iter_extract_survey_variables` to get all of them.
+    """
     base = base_url or extract_base_url()
     if not base:
         raise CatalogExtractError("Extract path is not configured")
@@ -390,33 +395,37 @@ def fetch_extract_survey_variables(
     encoded = quote(idno.strip(), safe="")
     return _request_extract(
         f"{base.rstrip('/')}/variables/{encoded}",
+        params=params,
         headers=headers,
         cookies=cookies,
     )
 
 
-def iter_extract_variables(
-    params: dict[str, Any] | None = None,
+def _iter_variable_pages(
+    fetch: Any,
     *,
-    max_items: int | None = None,
-    page_size: int = 200,
-    base_url: str | None = None,
-    headers: dict[str, str] | None = None,
-    cookies: dict[str, str] | None = None,
+    params: dict[str, Any] | None,
+    page_size: int,
+    max_items: int | None,
+    on_page: Callable[[dict[str, Any]], None] | None = None,
 ) -> Iterator[dict[str, Any]]:
-    """Paginate every variable in the catalog (the ``/variables`` batch route)."""
-    offset = 0
+    """Walk a keyset-paged variables route: ``next_after_uid`` of one page is ``after_uid`` of the next.
+
+    ``on_page``, if given, is called with every raw response before its variables are yielded — for what a page
+    carries besides variables (``total`` on the first page of a walk, for a progress figure).
+    """
+    after_uid: int | None = None
     seen = 0
     while True:
-        data = fetch_extract_variables_page(
-            {**(params or {}), "offset": offset, "limit": page_size},
-            base_url=base_url,
-            headers=headers,
-            cookies=cookies,
-        )
+        page_params = {**(params or {}), "limit": page_size}
+        if after_uid is not None:
+            page_params["after_uid"] = after_uid
+        data = fetch(page_params)
+        if on_page is not None:
+            on_page(data)
         batch = _variables_from_response(data)
         if not batch:
-            break
+            return
 
         for variable in batch:
             yield variable
@@ -424,9 +433,53 @@ def iter_extract_variables(
             if max_items is not None and seen >= max_items:
                 return
 
-        if not data.get("has_more"):
-            break
-        offset += page_size
+        after_uid = data.get("next_after_uid")
+        if not data.get("has_more") or after_uid is None:
+            return
+
+
+def iter_extract_survey_variables(
+    idno: str,
+    *,
+    page_size: int = 1000,
+    max_items: int | None = None,
+    on_page: Callable[[dict[str, Any]], None] | None = None,
+    base_url: str | None = None,
+    headers: dict[str, str] | None = None,
+    cookies: dict[str, str] | None = None,
+) -> Iterator[dict[str, Any]]:
+    """Every variable of one study, fetched page by page (keyset paging, so a page costs the same however deep)."""
+    return _iter_variable_pages(
+        lambda params: fetch_extract_survey_variables(
+            idno, params=params, base_url=base_url, headers=headers, cookies=cookies
+        ),
+        params=None,
+        page_size=page_size,
+        max_items=max_items,
+        on_page=on_page,
+    )
+
+
+def iter_extract_variables(
+    params: dict[str, Any] | None = None,
+    *,
+    max_items: int | None = None,
+    page_size: int = 1000,
+    on_page: Callable[[dict[str, Any]], None] | None = None,
+    base_url: str | None = None,
+    headers: dict[str, str] | None = None,
+    cookies: dict[str, str] | None = None,
+) -> Iterator[dict[str, Any]]:
+    """Every variable in the catalog (the ``/variables`` batch route), keyset-paged."""
+    return _iter_variable_pages(
+        lambda page_params: fetch_extract_variables_page(
+            page_params, base_url=base_url, headers=headers, cookies=cookies
+        ),
+        params=params,
+        page_size=page_size,
+        max_items=max_items,
+        on_page=on_page,
+    )
 
 
 def write_metadata_cache(
