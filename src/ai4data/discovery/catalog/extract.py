@@ -401,6 +401,47 @@ def fetch_extract_survey_variables(
     )
 
 
+def _iter_keyset_pages(
+    fetch: Any,
+    *,
+    params: dict[str, Any] | None,
+    page_size: int,
+    max_items: int | None,
+    on_page: Callable[[dict[str, Any]], None] | None,
+    items_key: str,
+    cursor_param: str,
+    cursor_key: str,
+) -> Iterator[dict[str, Any]]:
+    """Walk a keyset-paged extract route: the page's ``cursor_key`` is the next request's ``cursor_param``.
+
+    ``on_page``, if given, is called with every raw response before its items are yielded — for what a page
+    carries besides items (``total`` on the first page of a walk, for a progress figure).
+    """
+    cursor: int | None = None
+    seen = 0
+    while True:
+        page_params = {**(params or {}), "limit": page_size}
+        if cursor is not None:
+            page_params[cursor_param] = cursor
+        data = fetch(page_params)
+        if on_page is not None:
+            on_page(data)
+        raw = data.get(items_key)
+        batch = [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
+        if not batch:
+            return
+
+        for item in batch:
+            yield item
+            seen += 1
+            if max_items is not None and seen >= max_items:
+                return
+
+        cursor = data.get(cursor_key)
+        if not data.get("has_more") or cursor is None:
+            return
+
+
 def _iter_variable_pages(
     fetch: Any,
     *,
@@ -409,33 +450,17 @@ def _iter_variable_pages(
     max_items: int | None,
     on_page: Callable[[dict[str, Any]], None] | None = None,
 ) -> Iterator[dict[str, Any]]:
-    """Walk a keyset-paged variables route: ``next_after_uid`` of one page is ``after_uid`` of the next.
-
-    ``on_page``, if given, is called with every raw response before its variables are yielded — for what a page
-    carries besides variables (``total`` on the first page of a walk, for a progress figure).
-    """
-    after_uid: int | None = None
-    seen = 0
-    while True:
-        page_params = {**(params or {}), "limit": page_size}
-        if after_uid is not None:
-            page_params["after_uid"] = after_uid
-        data = fetch(page_params)
-        if on_page is not None:
-            on_page(data)
-        batch = _variables_from_response(data)
-        if not batch:
-            return
-
-        for variable in batch:
-            yield variable
-            seen += 1
-            if max_items is not None and seen >= max_items:
-                return
-
-        after_uid = data.get("next_after_uid")
-        if not data.get("has_more") or after_uid is None:
-            return
+    """Walk a keyset-paged variables route: ``next_after_uid`` of one page is ``after_uid`` of the next."""
+    return _iter_keyset_pages(
+        fetch,
+        params=params,
+        page_size=page_size,
+        max_items=max_items,
+        on_page=on_page,
+        items_key="variables",
+        cursor_param="after_uid",
+        cursor_key="next_after_uid",
+    )
 
 
 def iter_extract_survey_variables(
@@ -479,6 +504,65 @@ def iter_extract_variables(
         page_size=page_size,
         max_items=max_items,
         on_page=on_page,
+    )
+
+
+def fetch_extract_citation(
+    citation_id: int,
+    *,
+    base_url: str | None = None,
+    headers: dict[str, str] | None = None,
+    cookies: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Fetch one citation document (``metadata``, ``core_fields``, ``filters``) by its NADA id."""
+    base = base_url or extract_base_url()
+    if not base:
+        raise CatalogExtractError("Extract path is not configured")
+
+    data = _request_extract(f"{base.rstrip('/')}/citations/{int(citation_id)}", headers=headers, cookies=cookies)
+    citation = data.get("citation")
+    if not isinstance(citation, dict):
+        raise CatalogExtractError(f"Extract response for citation {citation_id} has no citation")
+    return citation
+
+
+def fetch_extract_citations_page(
+    params: dict[str, Any] | None = None,
+    *,
+    base_url: str | None = None,
+    headers: dict[str, str] | None = None,
+    cookies: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Fetch one paginated ``/citations`` page (``limit``/``after_id``/``offset`` in ``params``)."""
+    base = base_url or extract_base_url()
+    if not base:
+        raise CatalogExtractError("Extract path is not configured")
+
+    return _request_extract(f"{base.rstrip('/')}/citations", params=params, headers=headers, cookies=cookies)
+
+
+def iter_extract_citations(
+    params: dict[str, Any] | None = None,
+    *,
+    max_items: int | None = None,
+    page_size: int = 500,
+    on_page: Callable[[dict[str, Any]], None] | None = None,
+    base_url: str | None = None,
+    headers: dict[str, str] | None = None,
+    cookies: dict[str, str] | None = None,
+) -> Iterator[dict[str, Any]]:
+    """Every citation document in the catalog (the ``/citations`` batch route), keyset-paged on the citation id."""
+    return _iter_keyset_pages(
+        lambda page_params: fetch_extract_citations_page(
+            page_params, base_url=base_url, headers=headers, cookies=cookies
+        ),
+        params=params,
+        page_size=page_size,
+        max_items=max_items,
+        on_page=on_page,
+        items_key="citations",
+        cursor_param="after_id",
+        cursor_key="next_after_id",
     )
 
 

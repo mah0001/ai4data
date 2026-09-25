@@ -333,3 +333,48 @@ class TestBatchExtractSinglePass(ExtractModeTestCase):
         for idno in ("RWA_NISR_DOC_2025_CPI-MR_MAY_FR_V1", "DOC-SECOND"):
             cache_path = discovery_paths.get_metadata_cache_path(idno, "document")
             self.assertTrue(cache_path.exists())
+
+
+class TestCitationsExtract(ExtractModeTestCase):
+    @mock.patch("ai4data.discovery.catalog.extract.httpx.get")
+    def test_fetch_extract_citation_returns_the_citation_document(self, mock_get):
+        mock_get.return_value = _FakeResponse({"status": "success", "citation": {"core_fields": {"citation_id": 7}}})
+
+        citation = catalog_extract.fetch_extract_citation(7)
+
+        self.assertEqual(citation, {"core_fields": {"citation_id": 7}})
+        self.assertTrue(mock_get.call_args.args[0].endswith("/citations/7"))
+
+    @mock.patch("ai4data.discovery.catalog.extract.httpx.get")
+    def test_fetch_extract_citation_without_a_citation_raises(self, mock_get):
+        mock_get.return_value = _FakeResponse({"status": "success"})
+
+        with self.assertRaises(catalog_extract.CatalogExtractError):
+            catalog_extract.fetch_extract_citation(7)
+
+    @mock.patch("ai4data.discovery.catalog.extract.httpx.get")
+    def test_iter_extract_citations_follows_the_keyset_cursor(self, mock_get):
+        mock_get.side_effect = [
+            _FakeResponse({"status": "success", "has_more": True, "next_after_id": 2, "citations": [{"a": 1}, {"a": 2}]}),
+            _FakeResponse({"status": "success", "has_more": False, "next_after_id": None, "citations": [{"a": 3}]}),
+        ]
+
+        rows = list(catalog_extract.iter_extract_citations(page_size=2))
+
+        self.assertEqual([r["a"] for r in rows], [1, 2, 3])
+        first, second = (c.kwargs["params"] for c in mock_get.call_args_list)
+        self.assertEqual(first, {"limit": 2})
+        self.assertEqual(second, {"limit": 2, "after_id": 2})
+        self.assertTrue(mock_get.call_args.args[0].endswith("/citations"))
+
+    @mock.patch("ai4data.discovery.catalog.extract.httpx.get")
+    def test_iter_extract_citations_reports_each_page_and_stops_at_max_items(self, mock_get):
+        mock_get.return_value = _FakeResponse(
+            {"status": "success", "total": 9, "has_more": True, "next_after_id": 2, "citations": [{"a": 1}, {"a": 2}]}
+        )
+        pages: list[dict] = []
+
+        rows = list(catalog_extract.iter_extract_citations(page_size=2, max_items=3, on_page=pages.append))
+
+        self.assertEqual(len(rows), 3)
+        self.assertEqual([p["total"] for p in pages], [9, 9])
